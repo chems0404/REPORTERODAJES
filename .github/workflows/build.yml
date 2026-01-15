@@ -1,0 +1,57 @@
+name: Build (macOS .app + Windows .exe)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          # 3.11 suele ser el más estable para PyInstaller en CI
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --clean --windowed \
+            --name "ReportesRodaje" \
+            --add-data "fonts:fonts" \
+            --add-data "reports:reports" \
+            --add-data "exports:exports" \
+            app.py
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --clean --windowed ^
+            --name "ReportesRodaje" ^
+            --add-data "fonts;fonts" ^
+            --add-data "reports;reports" ^
+            --add-data "exports;exports" ^
+            app.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReportesRodaje-${{ runner.os }}
+          path: |
+            dist/**
