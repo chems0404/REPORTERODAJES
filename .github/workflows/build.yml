@@ -2,13 +2,12 @@ name: Build (macOS .app + Windows .exe)
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build:
     strategy:
-      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -20,7 +19,6 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          # 3.11 suele ser el más estable para PyInstaller en CI
           python-version: "3.11"
 
       - name: Install dependencies
@@ -29,29 +27,50 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # ---- ensure folders exist (fix for empty dirs / missing dirs) ----
+      - name: Ensure folders exist (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p reports exports
+
+      - name: Ensure folders exist (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path reports)) { New-Item -ItemType Directory reports | Out-Null }
+          if (!(Test-Path exports)) { New-Item -ItemType Directory exports | Out-Null }
+
+      # ---- build ----
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconfirm --clean --windowed \
-            --name "ReportesRodaje" \
+          pyinstaller --noconfirm --clean --windowed app.py \
+            --name ReportesRodaje \
             --add-data "fonts:fonts" \
             --add-data "reports:reports" \
-            --add-data "exports:exports" \
-            app.py
+            --add-data "exports:exports"
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed ^
-            --name "ReportesRodaje" ^
-            --add-data "fonts;fonts" ^
-            --add-data "reports;reports" ^
-            --add-data "exports;exports" ^
-            app.py
+          pyinstaller --noconfirm --clean --windowed app.py `
+            --name ReportesRodaje `
+            --add-data "fonts;fonts" `
+            --add-data "reports;reports" `
+            --add-data "exports;exports"
 
-      - name: Upload artifact
+      # ---- upload artifacts ----
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: ReportesRodaje-${{ runner.os }}
-          path: |
-            dist/**
+          name: ReportesRodaje-macOS
+          path: dist/ReportesRodaje.app
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReportesRodaje-Windows
+          path: dist/ReportesRodaje.exe
