@@ -27,7 +27,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ---- BUILD macOS (.app) ----
+      # IMPORTANT: ensure folders exist in CI
+      - name: Ensure runtime folders exist
+        run: |
+          mkdir -p exports reports
+        shell: bash
+
+      # Build for macOS
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -37,11 +43,11 @@ jobs:
             --add-data "reports:reports" \
             --add-data "exports:exports" \
             app.py
+        shell: bash
 
-      # ---- BUILD Windows (.exe) ----
+      # Build for Windows
       - name: Build (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --windowed `
             --name "ReportesRodaje" `
@@ -49,10 +55,10 @@ jobs:
             --add-data "reports;reports" `
             --add-data "exports;exports" `
             app.py
+        shell: pwsh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ReportesRodaje-${{ runner.os }}
-          path: |
-            dist/**
+          path: dist/
