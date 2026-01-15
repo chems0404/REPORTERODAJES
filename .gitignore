@@ -1,23 +1,40 @@
+# ===============================
 # Python
+# ===============================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.log
 
-# venv
+# ===============================
+# Virtual environments
+# ===============================
 .venv/
 venv/
 
-# builds
+# ===============================
+# Build / PyInstaller
+# ===============================
 build/
 dist/
 *.spec
 
-# app runtime outputs
-exports/
-reports/
+# ===============================
+# App runtime outputs
+# (las carpetas DEBEN existir para PyInstaller)
+# ===============================
 
+# Ignorar contenido generado
+exports/*
+reports/*
+
+# PERO conservar las carpetas en el repo
+!exports/.gitkeep
+!reports/.gitkeep
+
+# ===============================
 # OS junk
+# ===============================
 .DS_Store
 Thumbs.db

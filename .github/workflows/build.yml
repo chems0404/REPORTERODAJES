@@ -27,50 +27,32 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # ---- ensure folders exist (fix for empty dirs / missing dirs) ----
-      - name: Ensure folders exist (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p reports exports
-
-      - name: Ensure folders exist (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (!(Test-Path reports)) { New-Item -ItemType Directory reports | Out-Null }
-          if (!(Test-Path exports)) { New-Item -ItemType Directory exports | Out-Null }
-
-      # ---- build ----
+      # ---- BUILD macOS (.app) ----
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconfirm --clean --windowed app.py \
-            --name ReportesRodaje \
+          pyinstaller --noconfirm --clean --windowed \
+            --name "ReportesRodaje" \
             --add-data "fonts:fonts" \
             --add-data "reports:reports" \
-            --add-data "exports:exports"
+            --add-data "exports:exports" \
+            app.py
 
+      # ---- BUILD Windows (.exe) ----
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed app.py `
-            --name ReportesRodaje `
+          pyinstaller --noconfirm --clean --windowed `
+            --name "ReportesRodaje" `
             --add-data "fonts;fonts" `
             --add-data "reports;reports" `
-            --add-data "exports;exports"
+            --add-data "exports;exports" `
+            app.py
 
-      # ---- upload artifacts ----
-      - name: Upload artifact (macOS)
-        if: runner.os == 'macOS'
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReportesRodaje-macOS
-          path: dist/ReportesRodaje.app
-
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ReportesRodaje-Windows
-          path: dist/ReportesRodaje.exe
+          name: ReportesRodaje-${{ runner.os }}
+          path: |
+            dist/**
