@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# venv
+.venv/
+venv/
+
+# builds
+build/
+dist/
+*.spec
+
+# app runtime outputs
+exports/
+reports/
+
+# OS junk
+.DS_Store
+Thumbs.db

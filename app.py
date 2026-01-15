@@ -1,7 +1,15 @@
 # app.py
+# Reportes de Rodaje — versión “pro” lista para .app (PyInstaller)
+# - Fonts (assets) se leen desde el bundle via resource_path()
+# - reports/exports (datos) se guardan SIEMPRE en Documents/ReportesRodaje/ (escritura segura)
+# - PDF: tabla paginada, celdas con wrap (nunca se pegan letras), badges solo color (sin texto)
+# - Reporte: editor con bold/italic/bullets + PDF paginado + soporte unicode/emoji (best-effort)
+
 import json
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -13,10 +21,41 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 
-APP_TITLE = "Reportes de Rodaje"
-REPORTS_DIR = "reports"
-EXPORTS_DIR = "exports"
+# =========================
+#  RUTAS “PRO” (CRÍTICO)
+# =========================
+def resource_path(relative_path: str) -> str:
+    """
+    Ruta correcta tanto en dev como dentro del .app (PyInstaller).
+    SOLO para leer assets que van dentro del bundle.
+    """
+    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
 
+
+def user_data_dir(app_folder_name="ReportesRodaje") -> str:
+    """
+    Carpeta segura para ESCRIBIR en macOS/Windows:
+    ~/Documents/ReportesRodaje/
+    """
+    base = Path.home() / "Documents" / app_folder_name
+    return str(base)
+
+
+APP_TITLE = "Reportes de Rodaje"
+
+# Assets (solo lectura dentro del bundle)
+FONTS_DIR = resource_path("fonts")
+
+# Datos (lectura/escritura) — NO usar _MEIPASS
+DATA_DIR = user_data_dir("ReportesRodaje")
+REPORTS_DIR = os.path.join(DATA_DIR, "reports")
+EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
+
+
+# =========================
+#  CONFIG
+# =========================
 STATUS_OPTIONS = ["WORK IN PROGRESS", "DONE", "ON HOLD", "CANCELLED"]
 PRIORITY_OPTIONS = ["BAJA", "MEDIA", "ALTA", "URGENTE"]
 
@@ -34,12 +73,14 @@ PRIORITY_COLORS = {
 }
 
 BACKUP_OPTIONS = ["PENDIENTE", "COMPLETADO"]
-STATE_COLOR = {"COMPLETADO": "#34A853", "PENDIENTE": "#EA4335"}  # PDF: solo color
 
-FONTS_DIR = "fonts"
+# PDF: solo color (sin texto)
+STATE_COLOR = {"COMPLETADO": "#34A853", "PENDIENTE": "#EA4335"}
 
 
-# ---------- helpers ----------
+# =========================
+#  HELPERS
+# =========================
 def ensure_dirs():
     os.makedirs(REPORTS_DIR, exist_ok=True)
     os.makedirs(EXPORTS_DIR, exist_ok=True)
@@ -117,8 +158,8 @@ class Badge(ttk.Frame):
 
 def register_unicode_fonts():
     """
-    Registra fuentes Unicode para que el PDF soporte más caracteres/emojis.
-    Si faltan los archivos, no rompe: usa Helvetica como fallback.
+    Registra fuentes Unicode para PDF (mejor soporte de caracteres / emojis).
+    Si faltan, usa Helvetica fallback.
     """
     try:
         regular = os.path.join(FONTS_DIR, "DejaVuSans.ttf")
@@ -127,7 +168,6 @@ def register_unicode_fonts():
         bolditalic = os.path.join(FONTS_DIR, "DejaVuSans-BoldOblique.ttf")
 
         if all(os.path.exists(p) for p in [regular, bold, italic, bolditalic]):
-            # Evita error si se registra dos veces
             if "DJV" not in pdfmetrics.getRegisteredFontNames():
                 pdfmetrics.registerFont(TTFont("DJV", regular))
                 pdfmetrics.registerFont(TTFont("DJV-B", bold))
@@ -141,8 +181,8 @@ def register_unicode_fonts():
 
 def safe_draw_string(pdf_canvas, x, y, s, font_name, font_size, color=colors.white):
     """
-    Dibuja texto sin romper por caracteres raros. Si algo no puede renderizar,
-    lo reemplaza por '□'.
+    Dibuja texto sin romper por caracteres raros.
+    Si algo no puede renderizar, lo reemplaza por '□'.
     """
     if s is None:
         s = ""
@@ -152,7 +192,7 @@ def safe_draw_string(pdf_canvas, x, y, s, font_name, font_size, color=colors.whi
         pdf_canvas.drawString(x, y, s)
         return
     except Exception:
-        cleaned = "".join(ch if ord(ch) < 0xD800 else "□" for ch in s)  # evita surrogate issues
+        cleaned = "".join(ch if ord(ch) < 0xD800 else "□" for ch in s)
         cleaned = cleaned.encode("utf-8", "replace").decode("utf-8")
         cleaned = "".join(ch if ch.isprintable() else "□" for ch in cleaned)
         pdf_canvas.setFont(font_name, font_size)
@@ -160,15 +200,17 @@ def safe_draw_string(pdf_canvas, x, y, s, font_name, font_size, color=colors.whi
         pdf_canvas.drawString(x, y, cleaned)
 
 
-# ---------- Rich text editor (tk.Text + tags) ----------
+# =========================
+#  EDITOR RICH TEXT
+# =========================
 class ReportEditor(ttk.Frame):
     """
     Editor simple con:
-    - Bold / Italic (por selección)
-    - Bullets (convierte líneas seleccionadas a "• ")
-    Guarda como:
+    - Bold / Italic (selección o línea actual)
+    - Bullets (agrega "• " al inicio de cada línea seleccionada)
+    Guarda payload:
       {"text": "...", "bold_ranges": [[start,end],...], "italic_ranges": [[start,end],...]}
-    donde start/end son offsets (int) sobre text.
+    offsets son sobre el string text completo.
     """
     def __init__(self, parent):
         super().__init__(parent)
@@ -188,7 +230,7 @@ class ReportEditor(ttk.Frame):
         self.text.tag_configure("italic", font=("Segoe UI", 10, "italic"))
         self.text.configure(font=("Segoe UI", 10))
 
-        hint = ttk.Label(self, text="Tip: seleccioná texto y presioná B/I. Para bullets: seleccioná líneas y presioná •")
+        hint = ttk.Label(self, text="Tip: seleccioná texto y presioná B/I. Bullets: seleccioná líneas y presioná •")
         hint.pack(anchor="w", pady=(6, 0))
 
     def _sel_or_current_line(self):
@@ -279,7 +321,9 @@ class ReportEditor(ttk.Frame):
             self.text.tag_add("italic", self._offset_to_index(s), self._offset_to_index(e))
 
 
-# ---------- app ----------
+# =========================
+#  APP
+# =========================
 class ReportApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -331,7 +375,11 @@ class ReportApp(tk.Tk):
         self.show_frame("EditorFrame")
 
     def open_report(self):
-        path = filedialog.askopenfilename(title="Abrir reporte", filetypes=[("Reporte JSON", "*.json")])
+        path = filedialog.askopenfilename(
+            title="Abrir reporte",
+            initialdir=REPORTS_DIR,
+            filetypes=[("Reporte JSON", "*.json")]
+        )
         if not path:
             return
         try:
@@ -382,7 +430,6 @@ class ReportApp(tk.Tk):
             return None
 
     def export_pdf(self, data: dict):
-        # ---- fechas display MM/DD/YYYY ----
         fi_iso = (data.get("fecha_inicio") or "").strip()
         ff_iso = (data.get("fecha_fin") or "").strip()
 
@@ -418,8 +465,13 @@ class ReportApp(tk.Tk):
             r, g, b = hex_to_rgb01(hex_color)
             return colors.Color(r, g, b)
 
-        # ---- PDF text helpers ----
+        # ---- PDF helpers ----
         def wrap_lines(pdf_canvas, text, font_name, font_size, max_width):
+            """
+            Wrap robusto para que NUNCA se peguen letras:
+            - separa por espacios
+            - si una palabra es muy larga, la corta por caracteres
+            """
             s = str(text or "").replace("\t", " ").strip()
             if not s:
                 return [""]
@@ -449,23 +501,7 @@ class ReportApp(tk.Tk):
                     cur = tok
                     return
 
-                # hyphen split
-                if "-" in tok:
-                    parts = tok.split("-")
-                    piece = ""
-                    for p in parts:
-                        candidate = (piece + ("-" if piece else "") + p)
-                        if pdf_canvas.stringWidth(candidate, font_name, font_size) <= max_width:
-                            piece = candidate
-                        else:
-                            if piece:
-                                lines.append(piece)
-                            piece = p
-                    if piece:
-                        lines.append(piece)
-                    return
-
-                # hard split
+                # cortar palabra por caracteres
                 buf = ""
                 for ch in tok:
                     candidate = buf + ch
@@ -487,8 +523,6 @@ class ReportApp(tk.Tk):
             return lines if lines else [""]
 
         def draw_lines(pdf_canvas, x, y_top, lines, font_name, font_size, line_h, color):
-            pdf_canvas.setFillColor(color)
-            pdf_canvas.setFont(font_name, font_size)
             y = y_top
             for ln in lines:
                 safe_draw_string(pdf_canvas, x, y, ln, font_name, font_size, color)
@@ -499,7 +533,7 @@ class ReportApp(tk.Tk):
             pdf_canvas.setFillColor(colors.Color(r, g, b))
             pdf_canvas.roundRect(x, y, w, h, 6, fill=1, stroke=0)
 
-        # ---- Report (rich text) paginated ----
+        # ---- Reporte rich text paginado ----
         def render_report_pages(pdf_canvas, payload, left_margin):
             text = (payload.get("text", "") or "")
             bold_ranges = payload.get("bold_ranges", []) or []
@@ -613,11 +647,10 @@ class ReportApp(tk.Tk):
 
             fs = 10
             lh = 0.20 * inch
-
             start_off = 0
             page_num = 1
 
-            def draw_page_title(pn):
+            def draw_page(pn):
                 pdf_canvas.setFillColor(BG)
                 pdf_canvas.rect(0, 0, width, height, fill=1, stroke=0)
 
@@ -632,16 +665,14 @@ class ReportApp(tk.Tk):
                 pdf_canvas.setLineWidth(1)
                 pdf_canvas.roundRect(card_x, card_y_top - card_h, card_w, card_h, 12, fill=0, stroke=1)
 
-            # vacío => 1 página
             if not text.strip():
-                draw_page_title(1)
-                safe_draw_string(pdf_canvas, text_x, text_y_top, "(sin texto)", "DJV" if has_unicode else "Helvetica",
-                                 10, LABEL)
+                draw_page(1)
+                safe_draw_string(pdf_canvas, text_x, text_y_top, "(sin texto)", FONT_N, 10, LABEL)
                 pdf_canvas.showPage()
                 return
 
             while start_off < len(text):
-                draw_page_title(page_num)
+                draw_page(page_num)
 
                 y = text_y_top
                 used = 0.0
@@ -658,12 +689,13 @@ class ReportApp(tk.Tk):
                 pdf_canvas.showPage()
                 page_num += 1
 
+        # ---- EXPORT PDF ----
         try:
             c = canvas.Canvas(out_path, pagesize=LETTER)
             width, height = LETTER
             left_margin = 0.85 * inch
 
-            # ---------- PORTADA ----------
+            # ========== PORTADA ==========
             c.setFillColor(BG)
             c.rect(0, 0, width, height, fill=1, stroke=0)
 
@@ -684,8 +716,7 @@ class ReportApp(tk.Tk):
             else:
                 logo_y = block_top - logo_size
 
-            gap = 0.18 * inch
-            title_y = logo_y - gap
+            title_y = logo_y - 0.18 * inch
 
             c.setFillColor(TITLE)
             c.setFont("Helvetica-Bold", 20)
@@ -742,12 +773,12 @@ class ReportApp(tk.Tk):
                     txt = str(valueinfo[1])
                     hexcol = valueinfo[2]
                     badge_fill = hex_to_rl(hexcol)
-                    badge_h = 0.28 * inch
-                    badge_w = max(1.25 * inch, (len(txt) * 0.11 + 0.70) * inch)
+                    badge_h2 = 0.28 * inch
+                    badge_w2 = max(1.25 * inch, (len(txt) * 0.11 + 0.70) * inch)
                     bx = value_x
                     by = y - 0.08 * inch
                     c.setFillColor(badge_fill)
-                    c.roundRect(bx, by, badge_w, badge_h, 7, fill=1, stroke=0)
+                    c.roundRect(bx, by, badge_w2, badge_h2, 7, fill=1, stroke=0)
                     c.setFillColor(colors.white)
                     c.setFont("Helvetica-Bold", 9)
                     c.drawString(bx + 0.14 * inch, by + 0.08 * inch, txt)
@@ -756,9 +787,10 @@ class ReportApp(tk.Tk):
 
             c.showPage()
 
-            # ---------- DÍAS ----------
+            # ========== DÍAS ==========
             dias = data.get("dias", [])
 
+            # headers cortos para evitar “mezcla”
             cols = [
                 ("TARJETA", 2.15),
                 ("BK B", 0.95),
@@ -901,7 +933,7 @@ class ReportApp(tk.Tk):
 
                     yrow_top = table_top - th - 0.10 * inch
 
-                    for row, row_h in zip(chunk, chunk_heights):
+                    for row, row_hh in zip(chunk, chunk_heights):
                         c.setStrokeColor(DIVIDER)
                         c.setLineWidth(1)
                         c.line(table_x + 0.15 * inch, yrow_top, table_x + table_w - 0.15 * inch, yrow_top)
@@ -924,12 +956,12 @@ class ReportApp(tk.Tk):
                         c.setLineWidth(1)
                         for wcol in col_widths[:-1]:
                             cx_lines += wcol
-                            c.line(cx_lines, yrow_top - row_h + 0.08 * inch, cx_lines, yrow_top - 0.08 * inch)
+                            c.line(cx_lines, yrow_top - row_hh + 0.08 * inch, cx_lines, yrow_top - 0.08 * inch)
 
                         cell_top_text_y = yrow_top - pad_y_cell - 0.05 * inch
                         cx = table_x
 
-                        # TARJETA (texto + hyperlink usando URL de dropbox)
+                        # TARJETA (wrap + hyperlink)
                         x0 = cx + pad_x
                         w0 = col_widths[0] - 2 * pad_x
                         lines_tarjeta = wrap_lines(c, tarjeta_txt, font_bold, fs_tarjeta, w0)
@@ -944,7 +976,7 @@ class ReportApp(tk.Tk):
                         w1 = col_widths[1] - 2 * pad_x
                         badge_w1 = min(w1, 1.35 * inch)
                         bx1 = x1 + (w1 - badge_w1) / 2
-                        by1 = (yrow_top - row_h) + (row_h - badge_h) / 2
+                        by1 = (yrow_top - row_hh) + (row_hh - badge_h) / 2
                         draw_badge_color_only(c, bx1, by1, badge_w1, badge_h, STATE_COLOR.get(backup_b, "#9AA0A6"))
 
                         # BK EXPO (solo color)
@@ -953,7 +985,7 @@ class ReportApp(tk.Tk):
                         w2 = col_widths[2] - 2 * pad_x
                         badge_w2 = min(w2, 1.35 * inch)
                         bx2 = x2 + (w2 - badge_w2) / 2
-                        by2 = (yrow_top - row_h) + (row_h - badge_h) / 2
+                        by2 = (yrow_top - row_hh) + (row_hh - badge_h) / 2
                         draw_badge_color_only(c, bx2, by2, badge_w2, badge_h, STATE_COLOR.get(backup_expo, "#9AA0A6"))
 
                         # PROXIES (solo color)
@@ -962,7 +994,7 @@ class ReportApp(tk.Tk):
                         wP = col_widths[3] - 2 * pad_x
                         badge_wP = min(wP, 1.35 * inch)
                         bxp = xP + (wP - badge_wP) / 2
-                        byp = (yrow_top - row_h) + (row_h - badge_h) / 2
+                        byp = (yrow_top - row_hh) + (row_hh - badge_h) / 2
                         draw_badge_color_only(c, bxp, byp, badge_wP, badge_h, STATE_COLOR.get(proxies, "#9AA0A6"))
 
                         # FILES
@@ -993,7 +1025,7 @@ class ReportApp(tk.Tk):
                         lines_com = wrap_lines(c, comentarios, font_body, fs_body, w6)
                         draw_lines(c, x6, cell_top_text_y, lines_com, font_body, fs_body, line_h, VALUE)
 
-                        yrow_top -= row_h
+                        yrow_top -= row_hh
 
                     c.setFillColor(LABEL)
                     c.setFont("Helvetica", 9)
@@ -1003,11 +1035,10 @@ class ReportApp(tk.Tk):
                     row_i += len(chunk)
                     page_idx += 1
 
-            # ---------- REPORTE (paginado, unicode/emojis) ----------
+            # ========== REPORTE (paginado + unicode/emojis) ==========
             payload = data.get("reporte_rich", {"text": "", "bold_ranges": [], "italic_ranges": []})
             render_report_pages(c, payload, left_margin)
 
-            # Guardar
             c.save()
             messagebox.showinfo("PDF exportado", f"PDF generado en:\n{out_path}")
 
@@ -1015,6 +1046,9 @@ class ReportApp(tk.Tk):
             messagebox.showerror("Error", f"No se pudo exportar el PDF.\n\n{e}")
 
 
+# =========================
+#  UI FRAMES
+# =========================
 class StartFrame(ttk.Frame):
     def __init__(self, parent, controller: ReportApp):
         super().__init__(parent)
@@ -1026,8 +1060,10 @@ class StartFrame(ttk.Frame):
         btns = ttk.Frame(self)
         btns.pack()
 
-        ttk.Button(btns, text="Nuevo reporte", width=22, command=controller.new_report).grid(row=0, column=0, padx=10, pady=6)
-        ttk.Button(btns, text="Abrir reporte existente", width=22, command=controller.open_report).grid(row=0, column=1, padx=10, pady=6)
+        ttk.Button(btns, text="Nuevo reporte", width=22, command=controller.new_report)\
+            .grid(row=0, column=0, padx=10, pady=6)
+        ttk.Button(btns, text="Abrir reporte existente", width=22, command=controller.open_report)\
+            .grid(row=0, column=1, padx=10, pady=6)
 
 
 class EditorFrame(ttk.Frame):
@@ -1069,7 +1105,8 @@ class EditorFrame(ttk.Frame):
 
         status_row = ttk.Frame(card)
         status_row.grid_columnconfigure(0, weight=1)
-        ttk.Combobox(status_row, textvariable=self.status_general, values=STATUS_OPTIONS, state="readonly").grid(row=0, column=0, sticky="ew")
+        ttk.Combobox(status_row, textvariable=self.status_general, values=STATUS_OPTIONS, state="readonly")\
+            .grid(row=0, column=0, sticky="ew")
         Badge(status_row, self.status_general, STATUS_COLORS).grid(row=0, column=1, padx=(10, 0), sticky="w")
         row(1, "Status general", status_row)
 
@@ -1087,16 +1124,16 @@ class EditorFrame(ttk.Frame):
 
         prio_row = ttk.Frame(card)
         prio_row.grid_columnconfigure(0, weight=1)
-        ttk.Combobox(prio_row, textvariable=self.prioridad, values=PRIORITY_OPTIONS, state="readonly").grid(row=0, column=0, sticky="ew")
+        ttk.Combobox(prio_row, textvariable=self.prioridad, values=PRIORITY_OPTIONS, state="readonly")\
+            .grid(row=0, column=0, sticky="ew")
         Badge(prio_row, self.prioridad, PRIORITY_COLORS).grid(row=0, column=1, padx=(10, 0), sticky="w")
         row(6, "Prioridad", prio_row)
 
-        # Notebook: Dias + Reporte
+        # Notebook: Días + Reporte
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, pady=(10, 0))
         self.nb = nb
 
-        # Tab días
         self.days_tab = ttk.Frame(nb, padding=10)
         nb.add(self.days_tab, text="Días / Data")
 
@@ -1128,7 +1165,7 @@ class EditorFrame(ttk.Frame):
     def pick_logo(self):
         path = filedialog.askopenfilename(
             title="Elegir logo",
-            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.gif *.webp"), ("Todos", "*.*")],
+            filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.gif *.webp"), ("Todos", "*.*")]
         )
         if path:
             self.logo_path.set(path)
@@ -1428,7 +1465,7 @@ class EditorFrame(ttk.Frame):
         if path:
             self.controller.report_data = data
             self.path_label.config(text=path)
-            messagebox.showinfo("Guardado", "Reporte guardado correctamente.")
+            messagebox.showinfo("Guardado", f"Reporte guardado.\n\nUbicación:\n{path}")
 
     def on_export(self):
         try:
@@ -1444,6 +1481,9 @@ class EditorFrame(ttk.Frame):
         self.controller.export_pdf(data)
 
 
+# =========================
+#  MAIN
+# =========================
 if __name__ == "__main__":
     ensure_dirs()
     app = ReportApp()
